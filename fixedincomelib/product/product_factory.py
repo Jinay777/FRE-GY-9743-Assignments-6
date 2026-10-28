@@ -41,8 +41,15 @@ class ProductFactory:
         **kwargs: Any,
     ) -> ProductRFRSwap:
 
-        #TODO
-        pass
+        effective_date, term = cls._resolve_swap_dates(value_date, axis1, data_convention)
+        # The quote is the fixed rate; both legs share the convention's period and basis.
+        return ProductRFRSwap(
+            effective_date, term, data_convention.payment_offset, data_convention.index_str,
+            values, PayOrReceive.from_string(kwargs.get("pay_or_rec", "receive")),
+            kwargs.get("notional", 1e4), data_convention.acc_period, data_convention.acc_basis,
+            data_convention.acc_period, data_convention.business_day_convention,
+            data_convention.holiday_convention, 0.0, data_convention.compounding_method,
+        )
 
     @classmethod
     def create_overnight_index_basis_swap(
@@ -54,8 +61,33 @@ class ProductFactory:
         **kwargs: Any,
     ) -> ProductOvernightIndexBasisSwap:
 
-        #TODO
-        pass
+        effective_date, term = cls._resolve_swap_dates(value_date, axis1, data_convention)
+        # The quote is the spread paid on top of leg 1 (the basis index).
+        return ProductOvernightIndexBasisSwap(
+            effective_date, term, data_convention.payment_offset,
+            data_convention.index_1_str, data_convention.index_2_str, values,
+            PayOrReceive.from_string(kwargs.get("pay_or_rec", "receive")),
+            kwargs.get("notional", 1e4), data_convention.acc_period_1, data_convention.acc_basis,
+            data_convention.acc_period_2, data_convention.business_day_convention,
+            data_convention.holiday_convention, data_convention.compounding_method,
+        )
+
+    @classmethod
+    def _resolve_swap_dates(cls, value_date, axis1, data_convention):
+        # Swap axis1 is "tenor" (spot start), "start offset x tenor", or "start date x end date".
+        first, second = cls._tokenize_axis1(axis1)
+        if second is None:
+            # Spot-starting: accrual begins on the value date and runs for the tenor.
+            return value_date, first
+        if first.is_term():
+            # Forward-starting: roll the start offset from the value date, then run for the tenor.
+            effective_date = add_period(
+                value_date, first.get_term(),
+                data_convention.business_day_convention, data_convention.holiday_convention,
+            )
+            return effective_date, second
+        # Explicit dates are taken as given.
+        return first.get_date(), second
 
     @classmethod
     def create_fra(cls, value_date, axis1, data_convention, values, **kwargs):

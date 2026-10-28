@@ -529,7 +529,34 @@ class ProductRFRSwap(Product):
         )
         self.compounding_method_ = compounding_method
 
-        #TODO
+        # I build both legs on the overnight index's own fixing calendar so their accrual dates line up,
+        # and pay each coupon with the swap's payment offset and payment conventions.
+        index_calendar = HolidayConvention(self.on_index_.fixingCalendar().name())
+        common = dict(
+            effective_date=self.effective_date_,
+            termination_date=self.termination_date_,
+            notional=self.notional_,
+            currency=self.currency_,
+            accrual_basis=self.accrual_basis_,
+            business_day_convention=self.pay_business_day_convention_,
+            holiday_convention=index_calendar,
+            payment_offset=self.pay_offset_,
+            payment_business_day_convention=self.pay_business_day_convention_,
+            payment_holiday_convention=self.pay_holiday_convention_,
+        )
+        # Fixed leg: each coupon pays N * K * alpha on the fixed leg's accrual period.
+        self.fixed_leg_ = InterestRateStream(
+            **common, accrual_period=self.accrual_period_, fixed_rate=self.fixed_rate_,
+        )
+        # Floating leg: compounded overnight fixings plus any spread, on its own accrual period.
+        self.floating_leg_ = InterestRateStream(
+            **common,
+            accrual_period=self.floating_leg_accrual_period_,
+            float_index=self.on_index_str_,
+            ois_compounding=self.compounding_method_,
+            ois_spread=self.spread_,
+            fixing_in_arrear=True,
+        )
 
         last_dt_fixed = self.fixed_leg_.last_date
         last_dt_floating = self.floating_leg_.last_date
@@ -727,7 +754,33 @@ class ProductOvernightIndexBasisSwap(Product):
 
         self.floating_leg_1_basis_ = None
         self.floating_leg_1_wo_basis_ = None
-        #TODO
+
+        def overnight_leg(on_index, on_index_str, accrual_period, spread):
+            # I mirror the supplied floating_leg_1_wo_basis construction so that leg 1 here has exactly
+            # the same coupons as the engine's "leg 1 index + leg 1 spread" decomposition.
+            return InterestRateStream(
+                effective_date=self.effective_date_,
+                termination_date=self.termination_date_,
+                accrual_period=accrual_period,
+                notional=self.notional_,
+                currency=self.currency_,
+                accrual_basis=self.accrual_basis_,
+                business_day_convention=self.pay_business_day_convention_,
+                holiday_convention=HolidayConvention(on_index.fixingCalendar().name()),
+                float_index=on_index_str,
+                ois_compounding=self.compounding_method_,
+                ois_spread=spread,
+                fixing_in_arrear=True,
+                payment_offset=self.pay_offset_,
+                payment_business_day_convention=self.pay_business_day_convention_,
+                payment_holiday_convention=self.pay_holiday_convention_,
+            )
+
+        # Leg 1 carries the quoted basis spread; leg 2 is the plain reference index.
+        self.floating_leg_1_ = overnight_leg(
+            self.on_index_1_, self.on_index_str_1_, self.accrual_period_1_, self.spread_)
+        self.floating_leg_2_ = overnight_leg(
+            self.on_index_2_, self.on_index_str_2_, self.accrual_period_2_, 0.0)
 
         last_dt_floating_1 = self.floating_leg_1_.last_date
         last_dt_floating_2 = self.floating_leg_2_.last_date
